@@ -75,12 +75,20 @@ bool RegistryHelper::requiresElevation()
 bool RegistryHelper::registerContextMenu(const QString &appPath)
 {
 #ifdef Q_OS_WIN
-    // We can assume we have admin privileges if Main.qml is loaded
-    QString command = QString("\"%1\" \"%2\"").arg(appPath, "%1");
+    // Normalize the app path and ensure it's quoted properly
+    QString normalizedAppPath = QDir::toNativeSeparators(appPath);
+    QString command = QString("\"%1\" \"%2\"").arg(normalizedAppPath).arg("%1");
 
-    // Set the display text explicitly using the default value
+    // Also register the icon (optional but nice)
+    QString iconKey = "HKEY_CLASSES_ROOT\\.zip\\shell\\ZipExtractor";
+
     bool success = writeRegistryKey(REGISTRY_KEY, "", MENU_TEXT) &&
                    writeRegistryKey(REGISTRY_COMMAND_KEY, "", command);
+
+    // Optionally set an icon
+    if (success) {
+        writeRegistryKey(iconKey, "Icon", QString("\"%1\",0").arg(normalizedAppPath));
+    }
 
     if (success) {
         emit registrationChanged();
@@ -96,8 +104,7 @@ bool RegistryHelper::registerContextMenu(const QString &appPath)
 bool RegistryHelper::unregisterContextMenu()
 {
 #ifdef Q_OS_WIN
-    // We can assume we have admin privileges if Main.qml is loaded
-    bool success = deleteRegistryKey("HKEY_CLASSES_ROOT\\*\\shell\\ZipExtractor");
+    bool success = deleteRegistryKey("HKEY_CLASSES_ROOT\\.zip\\shell\\ZipExtractor");
 
     if (success) {
         emit registrationChanged();
