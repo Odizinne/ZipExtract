@@ -51,6 +51,9 @@ private slots:
 private:
     explicit ZipExtractor(QObject *parent = nullptr);
     void resetProgress();
+    bool shouldExtractRecursively(const QString &zipPath) const;
+    QString getUniqueFileName(const QString &directory, const QString &baseName, const QString &extension) const;
+    void extractNestedZip(const QString &zipPath);
 
     static ZipExtractor* s_instance;
 
@@ -66,7 +69,9 @@ private:
     QTimer *m_etaTimer;
     QList<QZipReader::FileInfo> m_fileList;
     QString m_destinationPath;
+    QString m_currentZipPath;  // Added to track current zip file path
     QElapsedTimer m_elapsedTimer;
+    QStringList m_nestedZipsToExtract;
 };
 
 #endif // ZIPEXTRACTOR_H

@@ -44,6 +44,9 @@ void ZipExtractor::startExtraction(const QString &zipPath, const QString &destPa
     m_isExtracting = true;
     emit isExtractingChanged();
 
+    // Store the current zip path
+    m_currentZipPath = zipPath;
+
     // Set destination path
     if (destPath.isEmpty()) {
         QFileInfo zipInfo(zipPath);
@@ -55,10 +58,10 @@ void ZipExtractor::startExtraction(const QString &zipPath, const QString &destPa
     // Create destination directory
     QDir().mkpath(m_destinationPath);
 
-    // Open ZIP file - Fixed constructor call
+    // Open ZIP file
     m_zipReader = new QZipReader(zipPath, QIODevice::ReadOnly);
     if (!m_zipReader->isReadable()) {
-        delete m_zipReader; // Use delete instead of deleteLater
+        delete m_zipReader;
         m_zipReader = nullptr;
         m_isExtracting = false;
         emit isExtractingChanged();
@@ -91,6 +94,13 @@ void ZipExtractor::startExtraction(const QString &zipPath, const QString &destPa
 void ZipExtractor::processNextFile()
 {
     if (m_currentFile >= m_fileList.size()) {
+        // All files extracted, now handle nested zips
+        if (!m_nestedZipsToExtract.isEmpty()) {
+            QString nextZip = m_nestedZipsToExtract.takeFirst();
+            extractNestedZip(nextZip);
+            return;
+        }
+
         // Extraction complete
         m_isExtracting = false;
         m_etaTimer->stop();
@@ -118,6 +128,29 @@ void ZipExtractor::processNextFile()
         if (outFile.open(QIODevice::WriteOnly)) {
             outFile.write(data);
         }
+
+        // Check if this is a zip file that should be extracted recursively
+        if (fileInfo.filePath.endsWith(".zip", Qt::CaseInsensitive)) {
+            if (shouldExtractRecursively(fullPath)) {
+                // Handle naming conflict
+                QFileInfo extractedZipInfo(fullPath);
+                QFileInfo originalZipInfo(m_currentZipPath);  // Use stored path instead of m_zipReader->fileName()
+
+                if (extractedZipInfo.baseName() == originalZipInfo.baseName() && m_fileList.size() > 1) {
+                    // Rename the nested zip to avoid conflict
+                    QString newName = getUniqueFileName(
+                        extractedZipInfo.absolutePath(),
+                        extractedZipInfo.baseName(),
+                        extractedZipInfo.suffix()
+                        );
+                    QString newPath = extractedZipInfo.absolutePath() + "/" + newName;
+                    QFile::rename(fullPath, newPath);
+                    m_nestedZipsToExtract.append(newPath);
+                } else {
+                    m_nestedZipsToExtract.append(fullPath);
+                }
+            }
+        }
     }
 
     // Update progress
@@ -129,6 +162,101 @@ void ZipExtractor::processNextFile()
 
     // Schedule next file
     m_extractTimer->start();
+}
+
+void ZipExtractor::extractNestedZip(const QString &zipPath)
+{
+    QFileInfo zipInfo(zipPath);
+    QString nestedDestPath = zipInfo.absolutePath() + "/" + zipInfo.baseName();
+
+    // Update current file name to show nested extraction
+    m_currentFileName = "Extracting nested: " + zipInfo.fileName();
+    emit currentFileNameChanged();
+
+    // Create nested destination
+    QDir().mkpath(nestedDestPath);
+
+    // Open nested ZIP
+    QZipReader nestedReader(zipPath, QIODevice::ReadOnly);
+    if (!nestedReader.isReadable()) {
+        // Continue with remaining nested zips
+        if (!m_nestedZipsToExtract.isEmpty()) {
+            QString nextZip = m_nestedZipsToExtract.takeFirst();
+            extractNestedZip(nextZip);
+        } else {
+            m_isExtracting = false;
+            m_etaTimer->stop();
+            emit isExtractingChanged();
+            emit extractionFinished(true, "Extraction completed with some nested ZIP errors");
+        }
+        return;
+    }
+
+    // Extract all files from nested ZIP
+    QList<QZipReader::FileInfo> nestedFileList = nestedReader.fileInfoList();
+
+    for (const auto &fileInfo : nestedFileList) {
+        QString fullPath = nestedDestPath + "/" + fileInfo.filePath;
+
+        if (fileInfo.isDir) {
+            QDir().mkpath(fullPath);
+        } else {
+            QDir().mkpath(QFileInfo(fullPath).absolutePath());
+            QByteArray data = nestedReader.fileData(fileInfo.filePath);
+            QFile outFile(fullPath);
+            if (outFile.open(QIODevice::WriteOnly)) {
+                outFile.write(data);
+            }
+
+            // Check for more nested zips
+            if (fileInfo.filePath.endsWith(".zip", Qt::CaseInsensitive)) {
+                if (shouldExtractRecursively(fullPath)) {
+                    m_nestedZipsToExtract.append(fullPath);
+                }
+            }
+        }
+    }
+
+    // Remove the extracted nested zip file
+    QFile::remove(zipPath);
+
+    // Continue with next nested zip or finish
+    if (!m_nestedZipsToExtract.isEmpty()) {
+        QString nextZip = m_nestedZipsToExtract.takeFirst();
+        extractNestedZip(nextZip);
+    } else {
+        m_isExtracting = false;
+        m_etaTimer->stop();
+        emit isExtractingChanged();
+        emit extractionFinished(true, "Extraction completed successfully");
+    }
+}
+
+bool ZipExtractor::shouldExtractRecursively(const QString &zipPath) const
+{
+    // Open the zip to check if it contains only another zip or has multiple files
+    QZipReader reader(zipPath, QIODevice::ReadOnly);
+    if (!reader.isReadable()) {
+        return false;
+    }
+
+    QList<QZipReader::FileInfo> fileList = reader.fileInfoList();
+
+    // Extract if it contains only one zip file, or if it's a zip among other files
+    return !fileList.isEmpty();
+}
+
+QString ZipExtractor::getUniqueFileName(const QString &directory, const QString &baseName, const QString &extension) const
+{
+    QString fileName;
+    int counter = 1;
+
+    do {
+        fileName = QString("%1 (%2).%3").arg(baseName).arg(counter).arg(extension);
+        counter++;
+    } while (QFile::exists(directory + "/" + fileName));
+
+    return fileName;
 }
 
 void ZipExtractor::updateETA()
@@ -167,6 +295,7 @@ void ZipExtractor::cancelExtraction()
         m_extractTimer->stop();
         m_etaTimer->stop();
         m_isExtracting = false;
+        m_nestedZipsToExtract.clear();
         emit isExtractingChanged();
         emit extractionFinished(false, "Extraction cancelled by user");
     }
@@ -179,9 +308,11 @@ void ZipExtractor::resetProgress()
     m_currentFileName = "";
     m_progress = 0.0;
     m_eta = "Calculating...";
+    m_currentZipPath = "";  // Clear the stored path
+    m_nestedZipsToExtract.clear();
 
     if (m_zipReader) {
-        delete m_zipReader; // Use delete instead of deleteLater
+        delete m_zipReader;
         m_zipReader = nullptr;
     }
 
