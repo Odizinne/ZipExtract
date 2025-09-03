@@ -21,9 +21,9 @@ int main(int argc, char *argv[])
         []() { QCoreApplication::exit(-1); },
         Qt::QueuedConnection);
     if (zipFilePath.isEmpty()) {
-        engine.loadFromModule("ZipExtract", "Main");
+        engine.loadFromModule("Odizinne.ZipExtract", "Main");
     } else {
-        engine.loadFromModule("ZipExtract", "Extractor");
+        engine.loadFromModule("Odizinne.ZipExtract", "Extractor");
     }
 
     return app.exec();
