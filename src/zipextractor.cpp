@@ -1,4 +1,4 @@
-#include "ZipExtractor.h"
+#include "zipextractor.h"
 #include <QDir>
 #include <QFileInfo>
 

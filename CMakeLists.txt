@@ -39,6 +39,10 @@ qt_add_executable(${CMAKE_PROJECT_NAME}
     "${CMAKE_CURRENT_BINARY_DIR}/windows_metadata.rc"
 )
 
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 set(QML_FILES
     qml/Main.qml
     qml/Extractor.qml

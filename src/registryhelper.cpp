@@ -1,4 +1,4 @@
-#include "RegistryHelper.h"
+#include "registryhelper.h"
 #include <QCoreApplication>
 #include <QDir>
 
