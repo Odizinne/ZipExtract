@@ -4,6 +4,7 @@
 
 #ifdef Q_OS_WIN
 #include <QSettings>
+#include <windows.h>
 #endif
 
 RegistryHelper* RegistryHelper::s_instance = nullptr;
@@ -46,11 +47,38 @@ bool RegistryHelper::isContextMenuRegistered()
 #endif
 }
 
+bool RegistryHelper::isRunningAsAdmin()
+{
+#ifdef Q_OS_WIN
+    BOOL isAdmin = FALSE;
+    PSID administratorsGroup = NULL;
+    SID_IDENTIFIER_AUTHORITY ntAuthority = SECURITY_NT_AUTHORITY;
+
+    if (AllocateAndInitializeSid(&ntAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID,
+                                 DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0,
+                                 &administratorsGroup)) {
+        CheckTokenMembership(NULL, administratorsGroup, &isAdmin);
+        FreeSid(administratorsGroup);
+    }
+
+    return isAdmin;
+#else
+    return false;
+#endif
+}
+
+bool RegistryHelper::requiresElevation()
+{
+    return false; // Always false now since we handle elevation at startup
+}
+
 bool RegistryHelper::registerContextMenu(const QString &appPath)
 {
 #ifdef Q_OS_WIN
+    // We can assume we have admin privileges if Main.qml is loaded
     QString command = QString("\"%1\" \"%2\"").arg(appPath, "%1");
 
+    // Set the display text explicitly using the default value
     bool success = writeRegistryKey(REGISTRY_KEY, "", MENU_TEXT) &&
                    writeRegistryKey(REGISTRY_COMMAND_KEY, "", command);
 
@@ -68,6 +96,7 @@ bool RegistryHelper::registerContextMenu(const QString &appPath)
 bool RegistryHelper::unregisterContextMenu()
 {
 #ifdef Q_OS_WIN
+    // We can assume we have admin privileges if Main.qml is loaded
     bool success = deleteRegistryKey("HKEY_CLASSES_ROOT\\*\\shell\\ZipExtractor");
 
     if (success) {
@@ -89,8 +118,18 @@ bool RegistryHelper::writeRegistryKey(const QString &key, const QString &value, 
 {
 #ifdef Q_OS_WIN
     QSettings settings(key, QSettings::NativeFormat);
-    settings.setValue(value, data);
-    return settings.status() == QSettings::NoError;
+    settings.setValue(value.isEmpty() ? "." : value, data);
+    settings.sync();
+
+    // Check if write was successful by reading it back
+    bool success = (settings.status() == QSettings::NoError);
+    if (success && !value.isEmpty()) {
+        // Verify the value was actually written
+        QString readBack = settings.value(value).toString();
+        success = (readBack == data);
+    }
+
+    return success;
 #else
     Q_UNUSED(key)
     Q_UNUSED(value)
@@ -104,7 +143,12 @@ bool RegistryHelper::deleteRegistryKey(const QString &key)
 #ifdef Q_OS_WIN
     QSettings settings(key, QSettings::NativeFormat);
     settings.clear();
-    return settings.status() == QSettings::NoError;
+    settings.sync();
+
+    // Verify deletion by checking if the key still exists
+    bool success = settings.allKeys().isEmpty();
+
+    return success;
 #else
     Q_UNUSED(key)
     return false;
@@ -115,7 +159,7 @@ QString RegistryHelper::readRegistryKey(const QString &key, const QString &value
 {
 #ifdef Q_OS_WIN
     QSettings settings(key, QSettings::NativeFormat);
-    return settings.value(value).toString();
+    return settings.value(value.isEmpty() ? "." : value).toString();
 #else
     Q_UNUSED(key)
     Q_UNUSED(value)

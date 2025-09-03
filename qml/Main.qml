@@ -7,9 +7,20 @@ ApplicationWindow {
     visible: true
     width: 400
     height: 250
-    title: "ZIP Extractor"
+    title: "ZIP Extractor (Administrator)"
     Universal.theme: Universal.System
     Universal.accent: palette.highlight
+
+    // Force refresh of registration status
+    property bool registrationStatus: RegistryHelper.isContextMenuRegistered()
+
+    Connections {
+        target: RegistryHelper
+        function onRegistrationChanged() {
+            // Force property update
+            registrationStatus = RegistryHelper.isContextMenuRegistered()
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -33,10 +44,10 @@ ApplicationWindow {
         }
 
         Label {
-            text: RegistryHelper.isContextMenuRegistered() ?
+            text: root.registrationStatus ?
                   "✓ Context menu is registered" :
                   "✗ Context menu not registered"
-            color: RegistryHelper.isContextMenuRegistered() ? "green" : "red"
+            color: root.registrationStatus ? "green" : "red"
             Layout.alignment: Qt.AlignHCenter
         }
 
@@ -46,22 +57,20 @@ ApplicationWindow {
 
             Button {
                 text: "Add"
-                enabled: !RegistryHelper.isContextMenuRegistered()
+                enabled: !root.registrationStatus
                 onClicked: {
                     if (RegistryHelper.registerContextMenu(RegistryHelper.getCurrentAppPath())) {
-                        // Force refresh of the status
-                        root.forceActiveFocus()
+                        // Status will update via signal
                     }
                 }
             }
 
             Button {
                 text: "Remove"
-                enabled: RegistryHelper.isContextMenuRegistered()
+                enabled: root.registrationStatus
                 onClicked: {
                     if (RegistryHelper.unregisterContextMenu()) {
-                        // Force refresh of the status
-                        root.forceActiveFocus()
+                        // Status will update via signal
                     }
                 }
             }

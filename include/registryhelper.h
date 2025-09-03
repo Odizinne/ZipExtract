@@ -20,6 +20,8 @@ public:
     Q_INVOKABLE bool registerContextMenu(const QString &appPath);
     Q_INVOKABLE bool unregisterContextMenu();
     Q_INVOKABLE QString getCurrentAppPath();
+    Q_INVOKABLE bool isRunningAsAdmin();
+    Q_INVOKABLE bool requiresElevation();
 
 signals:
     void registrationChanged();
