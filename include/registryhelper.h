@@ -34,8 +34,6 @@ private:
     QString readRegistryKey(const QString &key, const QString &value);
 
     static RegistryHelper* s_instance;
-    static const QString REGISTRY_KEY;
-    static const QString REGISTRY_COMMAND_KEY;
     static const QString MENU_TEXT;
 };
 

@@ -9,8 +9,6 @@
 
 RegistryHelper* RegistryHelper::s_instance = nullptr;
 
-const QString RegistryHelper::REGISTRY_KEY = "HKEY_CLASSES_ROOT\\*\\shell\\ZipExtractor";
-const QString RegistryHelper::REGISTRY_COMMAND_KEY = "HKEY_CLASSES_ROOT\\*\\shell\\ZipExtractor\\command";
 const QString RegistryHelper::MENU_TEXT = "Extract Here";
 
 RegistryHelper::RegistryHelper(QObject *parent)
@@ -40,7 +38,13 @@ RegistryHelper* RegistryHelper::instance()
 bool RegistryHelper::isContextMenuRegistered()
 {
 #ifdef Q_OS_WIN
-    QString command = readRegistryKey(REGISTRY_COMMAND_KEY, "");
+    QString zipAssoc = readRegistryKey("HKEY_CLASSES_ROOT\\.zip", "");
+    if (zipAssoc.isEmpty())
+        return false;
+
+    QString commandKey = QString("HKEY_CLASSES_ROOT\\%1\\shell\\ZipExtractor\\command").arg(zipAssoc);
+    QString command = readRegistryKey(commandKey, "");
+
     return !command.isEmpty();
 #else
     return false;
@@ -69,30 +73,28 @@ bool RegistryHelper::isRunningAsAdmin()
 
 bool RegistryHelper::requiresElevation()
 {
-    return false; // Always false now since we handle elevation at startup
+    return false; // Assuming elevation is handled externally
 }
 
 bool RegistryHelper::registerContextMenu(const QString &appPath)
 {
 #ifdef Q_OS_WIN
-    // Normalize the app path and ensure it's quoted properly
+    QString zipAssoc = readRegistryKey("HKEY_CLASSES_ROOT\\.zip", "");
+    if (zipAssoc.isEmpty())
+        zipAssoc = ".zip"; // fallback
+
+    QString baseKey = QString("HKEY_CLASSES_ROOT\\%1\\shell\\ZipExtractor").arg(zipAssoc);
+    QString commandKey = baseKey + "\\command";
+
     QString normalizedAppPath = QDir::toNativeSeparators(appPath);
-    QString command = QString("\"%1\" \"%2\"").arg(normalizedAppPath).arg("%1");
+    QString command = QString("\"%1\" \"%%1\"").arg(normalizedAppPath); // %%1 escapes %1 for registry
 
-    // Also register the icon (optional but nice)
-    QString iconKey = "HKEY_CLASSES_ROOT\\.zip\\shell\\ZipExtractor";
+    bool success = writeRegistryKey(baseKey, "", MENU_TEXT) &&
+                   writeRegistryKey(baseKey, "Icon", QString("\"%1\",0").arg(normalizedAppPath)) &&
+                   writeRegistryKey(commandKey, "", command);
 
-    bool success = writeRegistryKey(REGISTRY_KEY, "", MENU_TEXT) &&
-                   writeRegistryKey(REGISTRY_COMMAND_KEY, "", command);
-
-    // Optionally set an icon
-    if (success) {
-        writeRegistryKey(iconKey, "Icon", QString("\"%1\",0").arg(normalizedAppPath));
-    }
-
-    if (success) {
+    if (success)
         emit registrationChanged();
-    }
 
     return success;
 #else
@@ -104,11 +106,15 @@ bool RegistryHelper::registerContextMenu(const QString &appPath)
 bool RegistryHelper::unregisterContextMenu()
 {
 #ifdef Q_OS_WIN
-    bool success = deleteRegistryKey("HKEY_CLASSES_ROOT\\.zip\\shell\\ZipExtractor");
+    QString zipAssoc = readRegistryKey("HKEY_CLASSES_ROOT\\.zip", "");
+    if (zipAssoc.isEmpty())
+        zipAssoc = ".zip"; // fallback
 
-    if (success) {
+    QString keyToDelete = QString("HKEY_CLASSES_ROOT\\%1\\shell\\ZipExtractor").arg(zipAssoc);
+    bool success = deleteRegistryKey(keyToDelete);
+
+    if (success)
         emit registrationChanged();
-    }
 
     return success;
 #else
@@ -128,10 +134,8 @@ bool RegistryHelper::writeRegistryKey(const QString &key, const QString &value, 
     settings.setValue(value.isEmpty() ? "." : value, data);
     settings.sync();
 
-    // Check if write was successful by reading it back
     bool success = (settings.status() == QSettings::NoError);
     if (success && !value.isEmpty()) {
-        // Verify the value was actually written
         QString readBack = settings.value(value).toString();
         success = (readBack == data);
     }
@@ -152,10 +156,7 @@ bool RegistryHelper::deleteRegistryKey(const QString &key)
     settings.clear();
     settings.sync();
 
-    // Verify deletion by checking if the key still exists
-    bool success = settings.allKeys().isEmpty();
-
-    return success;
+    return settings.allKeys().isEmpty();
 #else
     Q_UNUSED(key)
     return false;
